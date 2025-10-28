@@ -22,7 +22,7 @@ MAX_ITERATIONS=5000
 
 # Detect OS and set Tesseract path
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-    TESSDATA_PATH="C:/Program Files/Tesseract-OCR/tessdata"
+    TESSDATA_PATH="../classification_model/tessdata"
 else
     TESSDATA_PATH="/usr/share/tesseract-ocr/5/tessdata"
 fi
