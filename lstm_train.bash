@@ -23,8 +23,8 @@ MAX_ITERATIONS=5000
 PSM=6  # Page segmentation mode for single line text
 
 # If you want to fine-tune from existing model:
-# START_MODEL="eng"
-# TESSDATA="../classification_model/tessdata"
+START_MODEL="eng"
+TESSDATA="../classification_model/tessdata"
 
 msg "========================================="
 msg "Tesseract LSTM Training"
