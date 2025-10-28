@@ -17,134 +17,98 @@ err() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 # ================================================
 # CONFIGURATION
 # ================================================
-PROJECT_ROOT="$(pwd)"
-DATA_DIR="$PROJECT_ROOT/data"
-GROUND_TRUTH_DIR="$DATA_DIR/classification-ground-truth"
-LANGDATA_DIR="$DATA_DIR/langdata"
-CLASSIFICATION_DIR="$DATA_DIR/classification"
 MODEL_NAME="classification"
-
-MODEL_OUTPUT_TRAINEDDATA="$CLASSIFICATION_DIR/$MODEL_NAME/$MODEL_NAME.traineddata"
-
-BASE_MODEL="eng"
+START_MODEL=""  # Empty = train from scratch, set to "eng" for fine-tuning
 MAX_ITERATIONS=5000
+PSM=6  # Page segmentation mode for single line text
 
-# Location of base model data (MUST contain eng.traineddata and eng.lstm!)
-TESSDATA_PATH="../classification_model/tessdata"
-mkdir -p "$TESSDATA_PATH"
-export TESSDATA_PREFIX="${TESSDATA_PATH%/}/"
-BASE_TRAINEDDATA="$TESSDATA_PATH/$BASE_MODEL.traineddata"
-BASE_LSTM="$TESSDATA_PATH/$BASE_MODEL.lstm"
+# If you want to fine-tune from existing model:
+# START_MODEL="eng"
+# TESSDATA="../classification_model/tessdata"
 
-msg "Using custom tessdata directory: $TESSDATA_PREFIX"
+msg "========================================="
+msg "Tesseract LSTM Training"
+msg "========================================="
+msg "Model Name: $MODEL_NAME"
+msg "Max Iterations: $MAX_ITERATIONS"
+msg "PSM Mode: $PSM"
 
-[ -f "$BASE_TRAINEDDATA" ] || err "Missing base traineddata: $BASE_TRAINEDDATA. Cannot continue."
-
-case "$BASE_TRAINEDDATA" in
-  *"Program Files"*) err "System tessdata path detected: $BASE_TRAINEDDATA" ;;
-esac
-case "$BASE_LSTM" in
-  *"Program Files"*) err "System tessdata path detected: $BASE_LSTM" ;;
-esac
-
-# ================================================
-# AUTO-EXTRACT LSTM IF MISSING
-# ================================================
-msg "Ensuring base LSTM exists in custom tessdata..."
-if [ ! -f "$BASE_LSTM" ]; then
-    msg "Base LSTM missing. Extracting from $BASE_TRAINEDDATA"
-    combine_tessdata -e "$BASE_TRAINEDDATA" "$BASE_LSTM"
-    [ -f "$BASE_LSTM" ] || err "Extraction failed. Cannot find $BASE_LSTM"
-    ok "Extracted base LSTM to $BASE_LSTM"
+if [ -z "$START_MODEL" ]; then
+    msg "Training Mode: FROM SCRATCH"
 else
-    ok "Found existing base LSTM: $BASE_LSTM"
+    msg "Training Mode: FINE-TUNING from $START_MODEL"
 fi
 
-msg "Verified base traineddata: $BASE_TRAINEDDATA"
+# ================================================
+# VALIDATE GROUND TRUTH
+# ================================================
+GROUND_TRUTH_DIR="data/${MODEL_NAME}-ground-truth"
+
+msg "Checking ground truth directory: $GROUND_TRUTH_DIR"
+[ -d "$GROUND_TRUTH_DIR" ] || err "Ground truth directory not found: $GROUND_TRUTH_DIR"
+
+# Count ground truth files
+gt_count=$(find "$GROUND_TRUTH_DIR" -name "*.gt.txt" | wc -l)
+img_count=$(find "$GROUND_TRUTH_DIR" -name "*.png" -o -name "*.jpg" -o -name "*.tif" | wc -l)
+
+msg "Found $gt_count ground truth files"
+msg "Found $img_count image files"
+
+[ "$gt_count" -gt 0 ] || err "No ground truth (.gt.txt) files found!"
+[ "$img_count" -gt 0 ] || err "No image files found!"
+
+ok "Ground truth validation passed"
 
 # ================================================
-# VALIDATE
+# CLEAN OLD FILES
 # ================================================
-msg "Checking training images..."
-[ -d "$GROUND_TRUTH_DIR" ] || err "Folder missing: $GROUND_TRUTH_DIR"
-
-count=$(find "$GROUND_TRUTH_DIR" -name "*.png" -o -name "*.jpg" -o -name "*.tif" | wc -l)
-[ "$count" -gt 0 ] || err "No image files found in $GROUND_TRUTH_DIR"
-
-ok "Found $count training images."
+msg "Cleaning old training files..."
+make clean MODEL_NAME="$MODEL_NAME" 2>/dev/null || true
+ok "Cleaned"
 
 # ================================================
-# GENERATE BOX & UNICHARSET
+# RUN TRAINING WITH MAKEFILE
 # ================================================
-msg "Generating BOX files..."
+msg "Starting training process..."
+msg "This will:"
+msg "  1. Extract unicharset"
+msg "  2. Create proto model"
+msg "  3. Generate LSTMF files"
+msg "  4. Train the model"
 
-for img in "$GROUND_TRUTH_DIR"/*.{png,jpg,tif,PNG,JPG,TIF}; do
-    [ -f "$img" ] || continue
-    base="${img%.*}"
-    tesseract "$img" "$base" --psm 6 lstm.train >/dev/null 2>&1 || true
-done
+if [ -z "$START_MODEL" ]; then
+    # Train from scratch
+    msg "Training from scratch..."
+    make training MODEL_NAME="$MODEL_NAME" \
+         MAX_ITERATIONS="$MAX_ITERATIONS" \
+         PSM="$PSM" || err "Training failed!"
+else
+    # Fine-tune from existing model
+    msg "Fine-tuning from $START_MODEL..."
+    make training MODEL_NAME="$MODEL_NAME" \
+         START_MODEL="$START_MODEL" \
+         TESSDATA="$TESSDATA" \
+         MAX_ITERATIONS="$MAX_ITERATIONS" \
+         PSM="$PSM" || err "Training failed!"
+fi
 
-ok "BOX files generated."
-
-msg "Extracting unicharset..."
-unicharset_extractor "$GROUND_TRUTH_DIR"/*.box
-mv unicharset "$CLASSIFICATION_DIR/unicharset"
-ok "unicharset ready."
-
-# ================================================
-# COMBINE LANGUAGE MODEL
-# ================================================
-msg "Combining training language model..."
-combine_lang_model \
-  --input_unicharset "$CLASSIFICATION_DIR/unicharset" \
-  --script_dir "$LANGDATA_DIR" \
-  --output_dir "$CLASSIFICATION_DIR" \
-  --lang "$MODEL_NAME"
-
-ok "Language model created."
+ok "Training completed successfully!"
 
 # ================================================
-# CREATE LIST FILE
+# CREATE FINAL TRAINEDDATA
 # ================================================
-msg "Creating list.txt..."
-find "$GROUND_TRUTH_DIR" -name "*.gt.txt" | sed 's/\.gt\.txt$//' > "$GROUND_TRUTH_DIR/list.txt"
-ok "Training list ready."
+msg "Creating final traineddata file..."
+make traineddata MODEL_NAME="$MODEL_NAME" || err "Failed to create traineddata"
 
-# ================================================
-# TRAIN MODEL
-# ================================================
-[ -f "$MODEL_OUTPUT_TRAINEDDATA" ] || err "Missing fine-tuning traineddata: $MODEL_OUTPUT_TRAINEDDATA"
+ok "Final model created: data/${MODEL_NAME}.traineddata"
 
-msg "Starting LSTM Training with custom base model..."
-msg "Continuing from: $BASE_LSTM"
-msg "Using training configuration: $MODEL_OUTPUT_TRAINEDDATA"
-
-mkdir -p "$CLASSIFICATION_DIR/checkpoints"
-
-lstmtraining \
-  --continue_from "$BASE_LSTM" \
-  --traineddata "$MODEL_OUTPUT_TRAINEDDATA" \
-  --train_listfile "$GROUND_TRUTH_DIR/list.txt" \
-  --model_output "$CLASSIFICATION_DIR/checkpoints/$MODEL_NAME" \
-  --max_iterations $MAX_ITERATIONS
-
-ok "Training Complete."
-
-# ================================================
-# FINALIZE MODEL
-# ================================================
-msg "Finalizing model..."
-
-lstmtraining \
-  --stop_training \
-  --continue_from "$CLASSIFICATION_DIR/checkpoints/${MODEL_NAME}" \
-  --traineddata "$CLASSIFICATION_DIR/$MODEL_NAME/$MODEL_NAME.traineddata" \
-  --model_output "$CLASSIFICATION_DIR/${MODEL_NAME}.traineddata"
-
-ok "Final Model Saved: $CLASSIFICATION_DIR/${MODEL_NAME}.traineddata"
-
-msg "Copying model to tessdata..."
-cp "$CLASSIFICATION_DIR/${MODEL_NAME}.traineddata" "$TESSDATA_PATH/" || \
-msg "Manual copy required → $CLASSIFICATION_DIR/${MODEL_NAME}.traineddata to $TESSDATA_PATH/"
-
-ok "DONE ✅"
+msg "========================================="
+ok "TRAINING COMPLETE! ✅"
+msg "========================================="
+msg "Your trained model is ready:"
+msg "  📦 data/${MODEL_NAME}.traineddata"
+msg ""
+msg "To use this model with Tesseract:"
+msg "  1. Copy it to your tessdata directory"
+msg "  2. Run: tesseract image.png output -l $MODEL_NAME"
+msg "========================================="
