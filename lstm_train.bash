@@ -277,7 +277,8 @@ train_model() {
     print_info "  Output model: $MODEL_NAME"
     
     local base_traineddata="$TESSDATA_PATH/$BASE_MODEL.traineddata"
-    
+    local base_lstm="$TESSDATA_PATH/$BASE_MODEL.lstm"
+
     if [ ! -f "$base_traineddata" ]; then
         print_error "Base model not found: $base_traineddata"
         exit 1
@@ -287,7 +288,7 @@ train_model() {
     
     lstmtraining \
         --model_output "$CLASSIFICATION_DIR/checkpoints" \
-        --continue_from "$base_traineddata" \
+        --continue_from "$base_lstm" \
         --traineddata "$CLASSIFICATION_DIR/$MODEL_NAME/$MODEL_NAME.traineddata" \
         --train_listfile "$GROUND_TRUTH_DIR/list.txt" \
         --max_iterations "$MAX_ITERATIONS" \
