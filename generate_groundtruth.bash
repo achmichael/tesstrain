@@ -72,7 +72,8 @@ if [ "$BACKUP_EXISTING" = true ]; then
     
     if [ "$backup_count" -gt 0 ]; then
         msg "Backing up existing ground truth files..."
-        backup_dir="$GROUND_TRUTH_DIR/backup_$(date +%Y%m%d_%H%M%S)"
+        # Move backup outside ground truth directory to avoid Makefile issues
+        backup_dir="$DATA_DIR/gt_backup_$(date +%Y%m%d_%H%M%S)"
         mkdir -p "$backup_dir"
         
         find "$GROUND_TRUTH_DIR" -maxdepth 1 -name "*.gt.txt" -exec mv {} "$backup_dir/" \;
